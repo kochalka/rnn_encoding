@@ -5,7 +5,7 @@ import numpy as np
 
 
 class RateUnitNetwork(nn.Module):
-    def __init__(self, inputSize, hiddenUnitNum, outputSize, dt, noise = None, dropUnit = None):
+    def __init__(self, inputSize, hiddenUnitNum, outputSize, dt, include_bias = False, noise = None, dropUnit = None):
         super(RateUnitNetwork, self).__init__()
 
         self.hiddenUnitNum = hiddenUnitNum
@@ -13,21 +13,16 @@ class RateUnitNetwork(nn.Module):
         self.noise = noise
         #TODO: self.tau = tau
         self.dropUnit = dropUnit
-        
-        self.i2h = nn.Linear(inputSize, hiddenUnitNum, bias=False)
-        self.i2h.weight.data = torch.FloatTensor(torch.Size([hiddenUnitNum, inputSize])).normal_(std=1.)
-        
-        self.h2h = nn.Linear(hiddenUnitNum, hiddenUnitNum, bias=False)
-        
-        self.h2o = nn.Linear(hiddenUnitNum, outputSize, bias=False)
-        self.h2o.weight.data = torch.FloatTensor(torch.Size([outputSize, hiddenUnitNum])).normal_(std = 1./np.sqrt(hiddenUnitNum))
+        self.i2h = nn.Linear(inputSize, hiddenUnitNum, bias=include_bias)
+        self.h2h = nn.Linear(hiddenUnitNum, hiddenUnitNum, bias=include_bias)
+        self.h2o = nn.Linear(hiddenUnitNum, outputSize, bias=include_bias)
         self.tanh = nn.Tanh()
         self.dt = dt
 
     def _h2h_backward_hook(self, grad):
         return grad * self.h2h_mask
-            
-    def init_h2h(self, prob_conn, g): #TODO: push into init()?
+
+    def init_chaos(self, prob_conn, g):
         size_h2h = (self.hiddenUnitNum, self.hiddenUnitNum)
         indices = np.where(np.random.uniform(0,1,size_h2h) < prob_conn)
         indices = np.delete(indices, np.where(indices[0]==indices[1]), axis=1) # remove self-connections
@@ -40,7 +35,9 @@ class RateUnitNetwork(nn.Module):
         values = torch.FloatTensor(int(indices.view(-1).size(0)/2)).normal_(std=sigma)
         self.h2h.weight.data = torch.sparse.FloatTensor(indices, values, torch.Size([self.hiddenUnitNum, self.hiddenUnitNum])).to_dense()
         self.h2h.weight.register_hook(self._h2h_backward_hook)
-        #return mask
+        # Also initialize input and output layers
+        self.i2h.weight.data = torch.FloatTensor(torch.Size([hiddenUnitNum, inputSize])).normal_(std=1.)
+        self.h2o.weight.data = torch.FloatTensor(torch.Size([outputSize, hiddenUnitNum])).normal_(std = 1./np.sqrt(hiddenUnitNum))
 
     def step(self, input, hidden):
         recurrentInput = self.h2h(self.tanh(hidden))
@@ -67,7 +64,7 @@ class RateUnitNetwork(nn.Module):
             outputs[:,t,:], hidden = self.step(input[:,t,:], hidden)
             hiddens[:,t,:] = hidden
         return outputs, hiddens
-    
+
 def dfs_util(a, i, v):
     v[i] = True
     c = i,
@@ -75,7 +72,7 @@ def dfs_util(a, i, v):
         if not v[j]:
             c += dfs_util(a, j, v)
     return c
-    
+
 def dfs_conn_comp(a):
     N = a.shape[0]
     v = np.zeros(N, 'bool')
@@ -86,9 +83,9 @@ def dfs_conn_comp(a):
     return c
 
 #TODO: def init_weights(func):
-# self.i2h = 
-# self.h2h = 
-# self.h2o = 
+# self.i2h =
+# self.h2h =
+# self.h2o =
 # % if p_connect is very small, you can use WXX = sprandn(numUnits,numUnits,p_connect)*scale;
 # % otherwise, use the following ("sprandn will generate significantly fewer nonzeros than requested if m*n is small or density is large")
 # WXX_mask = rand(numUnits,numUnits);
